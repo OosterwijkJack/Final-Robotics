@@ -1,0 +1,502 @@
+<!DOCTYPE aesl-source>
+<network>
+
+
+<!--list of global events-->
+
+
+<!--list of constants-->
+<constant value="3000" name="W_THRESHOLD"/>
+<constant value="200" name="B_THRESHOLD"/>
+<constant value="100" name="H_THRESHOLD"/>
+<constant value="100" name="GROUND_THRESHOLD"/>
+<constant value="150" name="SPEED"/>
+<constant value="50" name="ADJUST_SPEED"/>
+<constant value="0" name="SEARCH_1"/>
+<constant value="1" name="ADJUST_1"/>
+<constant value="2" name="FIND_1"/>
+<constant value="3" name="TIMER_1"/>
+<constant value="4" name="SEARCH_2"/>
+<constant value="5" name="ADJUST_2"/>
+<constant value="6" name="SEARCH_3"/>
+<constant value="7" name="TIMER_2"/>
+<constant value="-1" name="IDLE"/>
+<constant value="8" name="HUG_WALL"/>
+<constant value="9" name="FIND_TAPE"/>
+<constant value="10" name="FOUND_TAPE"/>
+<constant value="11" name="TURN_TAPE"/>
+<constant value="12" name="FOLLOW_TAPE"/>
+<constant value="13" name="MOVE_X"/>
+<constant value="14" name="FIND_X"/>
+
+
+<!--show keywords state-->
+<keywords flag="true"/>
+
+
+<!--node thymio-II-->
+<node nodeId="1" name="thymio-II">var leftS = 1
+var midS = 2
+var rightS = 3
+
+var leftRead
+var midRead
+var rightRead
+var error
+var turn
+
+var leftResult = 0
+var midResult = 0
+var rightResult = 0
+
+var rightGround = 0
+var leftGround = 0
+
+var turnLeftFirst = 0 # direction for wall 
+var turnLeftSecond = 0 # direction for side of box with chest
+
+var currentRead = 0
+var state = IDLE
+
+var timer0_state = 0
+var timer1_state = 0
+
+var tapped = 0
+var pauseMove = 0
+
+var max
+var mean
+var min
+
+var hugState = 0
+
+var checkForBlack = 0
+var checked = 0
+var lines = 0
+
+var hugRead
+var shouldStop = 0
+var shouldTurnEnd = 0
+
+timer.period[0] = 0
+
+motor.left.target = 0
+motor.right.target = 0
+
+onevent button.backward
+	motor.left.target = 0
+	motor.right.target = 0
+	state = IDLE
+
+onevent button.forward
+	state = SEARCH_1
+	call leds.circle(0,0,0,0,0,0,0,0)  
+	call leds.circle(0,0,0,0,0,0,0,0)
+	call leds.top(0,0,0)
+	
+	lines = 0
+	checkForBlack = 0
+	hugState = 0
+	turnLeftFirst = 0
+	turnLeftSecond = 1
+	timer0_state = 0
+	timer1_state = 0
+
+onevent prox
+    
+    
+    leftRead = prox.horizontal[leftS]
+    midRead = prox.horizontal[midS]
+    rightRead = prox.horizontal[rightS]
+    leftGround = prox.ground.delta[0]
+    rightGround = prox.ground.delta[1]
+    
+    # Check SEARCH_1
+    if state == SEARCH_1 or state == SEARCH_2 then
+        motor.left.target = SPEED
+        motor.right.target = SPEED
+        
+        if leftGround &lt; GROUND_THRESHOLD or rightGround &lt; GROUND_THRESHOLD then
+            motor.left.target = ADJUST_SPEED
+            motor.right.target = ADJUST_SPEED  # Bug fix: was left twice
+            state = state + 1  # next state
+        end
+    end
+    
+    # Check ADJUST_1
+    if state == ADJUST_1 then
+        callsub approachBlock # read block
+    end
+    
+    if state == FIND_1 then
+    	motor.left.target = -SPEED
+    	motor.right.target = -SPEED
+    	state = TIMER_1 # no state while timer 0
+    	timer.period[0] = 1
+    	
+    end
+    
+    if state == ADJUST_2 then
+    	callsub approachBlock
+    end
+    
+    if  state == SEARCH_3 then
+    	state = TIMER_2
+    	timer.period[0] = 1
+    end
+    
+    if  state == HUG_WALL then
+    	callsub hugWall
+    end
+    
+    if  state == FIND_TAPE then
+    		call leds.top(0,0,0)
+			motor.left.target = SPEED
+			motor.right.target = SPEED
+			
+			if leftGround &lt; 100 and rightGround &lt; 100 then
+				state = FOUND_TAPE
+			end
+			
+			
+    end
+    
+    if  state == FOUND_TAPE then
+    		if turnLeftSecond == 1 then
+    			motor.left.target = -SPEED
+    			motor.right.target = SPEED
+    			timer.period[0] = 500
+    		else
+    			motor.left.target = SPEED
+    			motor.right.target = -SPEED
+    			timer.period[0] = 500
+    		
+    end
+    state = TURN_TAPE
+   end
+   
+   if  state == FOLLOW_TAPE then 
+   	timer.period[0] = 3000
+   	timer.period[1] = 0
+   	error = leftGround - rightGround
+		turn = error/7
+	
+	   motor.left.target = SPEED + turn
+	   motor.right.target = SPEED - turn
+	   
+	   if leftGround > 100 and rightGround > 100 and tapped == 0 and shouldTurnEnd == 1 then
+	   	if turnLeftSecond == 1 then
+	   		motor.left.target = SPEED
+	   		motor.right.target = -SPEED
+	   		if  tapped == 1 or prox.horizontal[4] > 3000 then
+	   			state = MOVE_X
+	   		end
+	   	else
+	   		motor.left.target = -SPEED
+	   		motor.right.target = SPEED
+	   		
+	   		if  tapped == 1 or prox.horizontal[0] > 3000 then
+	   			state = MOVE_X
+	   		end
+	   	end
+	   	
+	   end
+	   
+	
+    end
+    if  state == MOVE_X then
+    	if  turnLeftSecond == 0 then
+    		motor.left.target = SPEED
+    		motor.right.target = -SPEED
+    		timer.period[0] = 500
+		elseif  turnLeftSecond == 1 then
+    		motor.left.target = -SPEED
+    		motor.right.target = SPEED
+    		timer.period[0] = 500
+    	end
+    	
+    end
+    if  state == FIND_X then
+    	if turnLeftSecond == 0 then
+    		motor.left.target = SPEED
+	   		motor.right.target = SPEED + 25
+	   	else
+	   		motor.left.target = SPEED
+	   		motor.right.target = SPEED 
+    	end
+    	
+	   	timer.period[1] = 3000
+	   	if (leftGround &lt; 10 or rightGround &lt; 10) and shouldStop == 1 then
+	   		timer.period[0] = 400
+	   	end
+    	
+    end
+    
+
+	
+onevent timer0
+
+	if  state == FIND_X then
+		motor.left.target = 0
+		motor.right.target = 0
+		state = IDLE
+		timer.period[0] = 0
+	end
+
+	if  state == MOVE_X then
+		motor.left.target = 0
+		motor.right.target = 0
+		state = FIND_X
+		timer.period[0] = 0
+	end
+
+	if  state == FOLLOW_TAPE then
+		shouldTurnEnd = 1
+		timer.period[0] = 0
+	end
+	if  state == TIMER_1 then
+		if timer0_state == 0 then
+			if turnLeftFirst == 1 then
+				motor.left.target = -SPEED
+				motor.right.target = SPEED
+			else
+				motor.left.target = SPEED
+				motor.right.target = -SPEED
+			end
+			
+		    timer.period[0] = 1200
+		    timer0_state = 1
+		elseif timer0_state == 1 then
+			motor.left.target = 0
+			motor.right.target = 0
+			
+			state = state+1
+			timer.period[0] = 0
+			timer0_state = 0
+		
+		end	
+
+	end
+	
+	if  state == FOLLOW_TAPE and tapped == 1 then
+		state = IDLE
+		motor.left.target = 0
+		motor.right.target = 0
+		timer.period[0] = 0
+	end
+	
+	if state == TURN_TAPE then
+		motor.left.target = 0
+		motor.right.target = 0
+		state = FOLLOW_TAPE
+		timer.period[0] = 0
+	end
+	
+	if  state == HUG_WALL then
+		hugState = 0
+		timer.period[0] = 0
+	end
+	
+	if  state == TIMER_2 then 
+	
+		if  timer0_state == 0 then # turn
+			if turnLeftFirst == 1 then
+				motor.left.target = SPEED
+				motor.right.target = -SPEED
+			else
+				motor.left.target = -SPEED
+				motor.right.target = SPEED
+			end
+			
+			timer.period[0] = 1200
+			timer0_state+=1
+		elseif  timer0_state == 1 then # straight
+			motor.left.target = SPEED
+			motor.right.target = SPEED
+				
+			timer0_state += 1
+			
+			timer.period[0] = 1
+		elseif  timer0_state == 2 then # if read wall
+			
+			if prox.horizontal[2] > 2000 then
+				state = HUG_WALL
+				timer.period[0] = 0
+			end
+		end
+	end
+	
+	
+onevent tap
+	if  state &lt; FIND_TAPE then
+		pauseMove = 1
+		timer.period[1] = 1
+	else
+		tapped = 1
+	end
+
+	
+onevent timer1
+	if state == FIND_X then
+		shouldStop = 1
+		timer.period[1] = 0
+	end
+
+	if  pauseMove == 1 then
+		if timer1_state == 0 then
+		motor.left.target = -SPEED
+		motor.right.target = -SPEED
+		timer1_state = 1
+		timer.period[1] = 200
+		elseif timer1_state == 1 then
+			motor.left.target = 0
+			motor.right.target = 0
+			timer1_state = 0
+			timer.period[1] = 0
+			tapped = 1
+			pauseMove = 0	
+		end
+	elseif state == HUG_WALL and lines != 3 then
+		checkForBlack = 1
+		timer.period[1] = 0
+	elseif  state == IDLE and lines == 3 then
+		motor.left.target = SPEED
+		motor.right.target = SPEED
+		state = FIND_TAPE
+		timer.period[1] = 0
+		lines++
+	end
+	
+   
+
+sub hugWall
+	if turnLeftFirst == 1 then
+		hugRead = prox.horizontal[0]
+	else
+		hugRead = prox.horizontal[4]
+	end
+
+	if hugState == 0 then
+    		timer.period[1] = 7000
+    		
+    		if turnLeftFirst == 1 then
+    			motor.left.target = -SPEED
+    		   motor.right.target = SPEED
+    		else
+	    		motor.left.target = SPEED
+	    		motor.right.target = -SPEED
+    		end
+    		
+    		if hugRead > 500 then
+    			hugState += 1
+    		end
+ 		elseif hugState == 1 then
+ 			
+ 			if turnLeftFirst == 1 then
+ 				motor.left.target = SPEED
+ 				motor.right.target = -SPEED
+ 			else
+ 				motor.left.target = -SPEED
+ 				motor.right.target = SPEED
+ 			end
+ 			
+ 			
+ 			if  hugRead == 0 then
+ 				hugState += 1
+ 			end
+ 		elseif hugState == 2 then
+ 			motor.left.target = 75
+ 			motor.right.target = 75
+ 			
+ 			timer.period[0] = 600
+ 			hugState = IDLE
+    	end
+    	if (prox.ground.delta[0] &lt; 10 and prox.ground.delta[1] &lt; 10 ) and checkForBlack == 1 and hugState == IDLE  then # count until 3 
+    		if checked == 0 then
+    			lines ++
+    		end
+    		checked = 1
+    	elseif  prox.ground.delta[0] > 100 and prox.ground.delta[1] > 100 and hugState == IDLE then
+    		checked = 0
+    		if lines ==3 then
+    			timer.period[0] = 0
+    			#state = FIND_TAPE
+    			motor.left.target = 0
+    			motor.right.target = 0
+    			timer.period[0] = 5000
+    			call leds.top(255,0,0)
+    			state = IDLE
+    		end
+    	end
+    		
+    	    
+   
+sub approachBlock
+	error = leftGround - rightGround
+	turn = error/35
+	
+	if  error == 0 and pauseMove != 1 then
+		motor.left.target = ADJUST_SPEED
+		motor.right.target = ADJUST_SPEED
+	elseif pauseMove != 1 then
+	   motor.left.target = ADJUST_SPEED + turn
+	   motor.right.target = ADJUST_SPEED - turn
+	end
+	
+
+	
+	if tapped == 1 then
+		callsub readBlock # read which way to go
+		
+		if state == ADJUST_1 then
+			if leftResult == 1 then
+				turnLeftFirst = 1
+				call leds.circle(0,0,0,0,0,0,32,0)  
+			else
+				turnLeftFirst = 0
+				call leds.circle(0,0,32,0,0,0,0,0)
+			end
+		end
+		if state == ADJUST_2 then
+			if leftResult == 1 then
+				turnLeftSecond = 1
+				call leds.circle(0,0,0,0,0,0,32,0) 
+			else 
+				turnLeftSecond = 0
+				call leds.circle(0,0,32,0,0,0,0,0)
+			end
+			
+		end
+		
+		tapped = 0
+		state = state + 1 # next state
+		motor.left.target = 0
+		motor.right.target = 0
+		
+		
+end
+	
+sub readBlock
+		if leftRead > H_THRESHOLD and leftRead &lt; W_THRESHOLD then # greater than Horizontal threshold but less than black threshold
+			leftResult = 0
+			
+		elseif leftRead > H_THRESHOLD and leftRead > W_THRESHOLD then # greater than white threshold
+			leftResult = 1
+		end
+		
+		if midRead > H_THRESHOLD and midRead &lt; W_THRESHOLD then # greater than Horizontal threshold but less than black W
+			midResult = 0
+			
+		elseif midRead > H_THRESHOLD and midRead > W_THRESHOLD then # greater than white threshold
+			midResult = 1
+		end
+		
+		if rightRead > H_THRESHOLD and rightRead &lt; W_THRESHOLD then # greater than Horizontal threshold but less than black threshold
+			rightResult = 0
+			
+		elseif rightRead > H_THRESHOLD and rightRead > W_THRESHOLD then # greater than white threshold
+			rightResult = 1
+		end</node>
+
+
+</network>
